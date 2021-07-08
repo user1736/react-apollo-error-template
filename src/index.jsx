@@ -5,6 +5,7 @@ import {
   GraphQLID,
   GraphQLString,
   GraphQLList,
+  GraphQLNonNull
 } from 'graphql';
 const PersonType = new GraphQLObjectType({
   name: 'Person',
@@ -24,8 +25,17 @@ const QueryType = new GraphQLObjectType({
   name: 'Query',
   fields: {
     people: {
-      type: new GraphQLList(PersonType),
-      resolve: () => peopleData,
+      /**
+       * Throwing an error for a non null type allows us to get the desired response shape:
+       * {
+       *   data: null,
+       *   errors: [Error('foo')]
+       * }
+       */
+      type: new GraphQLNonNull(new GraphQLList(PersonType)),
+      resolve: () => {
+        throw new Error('foo')
+      },
     },
   },
 });
@@ -99,6 +109,7 @@ const ALL_PEOPLE = gql`
     people {
       id
       name
+      sampleClientField @client
     }
   }
 `;
@@ -117,6 +128,7 @@ function App() {
   const {
     loading,
     data,
+    error,
   } = useQuery(ALL_PEOPLE);
 
   const [addPerson] = useMutation(ADD_PERSON, {
@@ -135,6 +147,26 @@ function App() {
       });
     },
   });
+
+  let content = (
+    <>
+      <h2>Names</h2>
+      {loading ? (
+        <p>Loading…</p>
+      ) : (
+        <ul>
+          {data?.people?.map(person => (
+            <li key={person.id}>{person.name}</li>
+          ))}
+        </ul>
+      )}
+    </>
+  )
+
+  if (error) {
+    /** Boom! Unexpected network error with stacktrace leading to local state */
+    content = <pre>{error.networkError?.stack ?? error.stack}</pre>
+  }
 
   return (
     <main>
@@ -159,21 +191,21 @@ function App() {
           Add person
         </button>
       </div>
-      <h2>Names</h2>
-      {loading ? (
-        <p>Loading…</p>
-      ) : (
-        <ul>
-          {data?.people.map(person => (
-            <li key={person.id}>{person.name}</li>
-          ))}
-        </ul>
-      )}
+      {content}
     </main>
   );
 }
 
 const client = new ApolloClient({
+  /**
+   * a presence of client resolvers is required for the issue to resurface
+   * @see {@link https://github.com/apollographql/apollo-client/blob/5dbeceedcb957efda59587493ac0d4012e83abbf/src/core/LocalState.ts#L166}
+   */
+  resolvers: {
+    Person: {
+      sampleClientField: () => 42
+    }
+  },
   cache: new InMemoryCache(),
   link
 });
